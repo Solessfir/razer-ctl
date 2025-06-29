@@ -1,6 +1,7 @@
 use librazer::command;
 use librazer::device;
 use librazer::feature;
+use librazer::descriptor::SUPPORTED;
 use librazer::types::{
     BatteryCare, CpuBoost, FanMode, FanZone, GpuBoost, LightsAlwaysOn, LogoMode, MaxFanSpeedMode,
     PerfMode,
@@ -205,17 +206,23 @@ impl Cli for feature::Perf {
 }
 
 fn enumerate() -> Result<()> {
-    let (pid_list, model_number_prefix) = device::Device::enumerate()?;
-
-    info!("Model: {}", model_number_prefix);
-    info!(
-        "Supported: {}",
-        librazer::descriptor::SUPPORTED
-            .iter()
-            .any(|supported| model_number_prefix == supported.model_number_prefix)
-    );
-    info!("PID: {:#06x?}", pid_list);
-    Ok(())
+    match device::Device::enumerate() {
+        Ok((pid_list, model_number_prefix)) => {
+            info!("Model: {}", model_number_prefix);
+            
+            let supported = SUPPORTED.iter().any(|d| 
+                model_number_prefix.starts_with(d.model_number_prefix)
+            );
+            
+            info!("Supported: {}", supported);
+            info!("PID: {:#06x?}", pid_list);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Enumeration failed: {}", e);
+            Err(e)
+        }
+    }
 }
 
 fn update_cmd(cmd: Command, features: &[Box<dyn Cli>]) -> Command {
@@ -249,8 +256,11 @@ fn gen_cli_features(feature_list: &[&str]) -> Vec<Box<dyn Cli>> {
 }
 
 fn main() -> Result<()> {
-    // Initialize logging with env_logger
-    env_logger::init();
+    // Initialize logging FIRST
+    env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .format_timestamp(None)
+        .init();
 
     let info_cmd = clap::Command::new("info").about("Get device info");
     let auto_cmd = clap::Command::new("auto")

@@ -2,7 +2,7 @@ use crate::descriptor::{Descriptor, SUPPORTED};
 use crate::packet::Packet;
 
 use anyhow::{anyhow, Context, Result};
-use log::{debug, error};
+use log::{debug};
 use std::{thread, time};
 use std::fs;
 
@@ -22,16 +22,23 @@ fn read_device_model() -> Result<String> {
 
 #[cfg(target_os = "linux")]
 fn read_device_model() -> Result<String> {
-    let sku = fs::read_to_string("/sys/devices/virtual/dmi/id/product_sku")
-        .map(|s| s.trim().to_string())
-        .map_err(|e| anyhow::anyhow!("Failed to read product SKU: {}", e))?;
-
-    debug!("Linux product SKU: {}", sku);
-
-    if sku.starts_with("RZ") {
-        Ok(sku.chars().take(10).collect())
-    } else {
-        anyhow::bail!("Invalid Razer laptop SKU: {}", sku)
+    let path = "/sys/devices/virtual/dmi/id/product_sku";
+    
+    match fs::read_to_string(path) {
+        Ok(sku) => {
+            let sku = sku.trim().to_string();
+            
+            if sku.starts_with("RZ") {
+                Ok(sku)
+            } else {
+                debug!("Invalid Razer SKU prefix: {}", sku);
+                Err(anyhow!("Invalid Razer SKU: {}", sku))
+            }
+        }
+        Err(e) => {
+            debug!("Failed to read {}: {}", path, e);
+            Err(anyhow!("DMI read error: {}", e))
+        }
     }
 }
 
@@ -51,7 +58,6 @@ impl Device {
     pub fn new(descriptor: Descriptor) -> Result<Device> {
         let api = hidapi::HidApi::new().context("Failed to create hid api")?;
 
-        // there are multiple devices with the same pid, pick first that support feature report
         for info in api.device_list().filter(|info| {
             (info.vendor_id(), info.product_id()) == (Device::RAZER_VID, descriptor.pid)
         }) {
@@ -94,57 +100,72 @@ impl Device {
     }
 
     pub fn enumerate() -> Result<(Vec<u16>, String)> {
-        let razer_pid_list: Vec<_> = hidapi::HidApi::new()?
-            .device_list()
+        let api = match hidapi::HidApi::new() {
+            Ok(api) => api,
+            Err(e) => {
+                debug!("Failed to create HID API: {}", e);
+                return Err(anyhow!("HID API error: {}", e));
+            }
+        };
+
+        let devices = api.device_list().collect::<Vec<_>>();
+        
+        let razer_devices: Vec<_> = devices
+            .iter()
             .filter(|info| info.vendor_id() == Device::RAZER_VID)
+            .collect();
+        
+        if razer_devices.is_empty() {
+            debug!("No Razer devices found");
+            return Err(anyhow!("No Razer devices found"));
+        }
+
+        // Extract unique PIDs
+        let pids: Vec<u16> = razer_devices.iter()
             .map(|info| info.product_id())
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
-        if razer_pid_list.is_empty() {
-            debug!("No Razer devices found in USB enumeration");
-            anyhow::bail!("No Razer devices found")
-        }
-
-        debug!("Found Razer devices with PIDs: {:?}", razer_pid_list);
-
-        match read_device_model() {
-            Ok(model) => {
-                debug!("Detected model number: {}", model);
-                if model.starts_with("RZ09-") {
-                    Ok((razer_pid_list, model))
-                } else {
-                    error!("Detected model but it's not a Razer laptop: {}", model);
-                    anyhow::bail!("Detected model but it's not a Razer laptop: {}", model)
-                }
-            }
+        // Get device model
+        let model = match read_device_model() {
+            Ok(m) => m,
             Err(e) => {
-                error!("Failed to detect model: {}", e);
-                anyhow::bail!("Failed to detect model: {}", e)
+                debug!("Failed to detect model: {}", e);
+                return Err(anyhow!("Failed to detect model: {}", e));
             }
+        };
+        
+        if !model.starts_with("RZ09-") {
+            debug!("Detected model is not a Razer laptop: {}", model);
+            return Err(anyhow!("Detected model is not a Razer laptop: {}", model));
         }
-    }
 
+        Ok((pids, model))
+    }
     pub fn detect() -> Result<Device> {
         let (pid_list, model_number_prefix) = Device::enumerate()?;
-        debug!("Looking for support for model: {}", model_number_prefix);
 
-        match SUPPORTED
-            .iter()
-            .find(|supported| model_number_prefix.starts_with(supported.model_number_prefix))
-        {
-            Some(supported) => {
-                debug!("Found supported device: {:?}", supported);
-                Device::new(supported.clone())
+        // Find matching descriptor
+        let supported = SUPPORTED.iter().find(|d| 
+            model_number_prefix.starts_with(d.model_number_prefix)
+        );
+
+        match supported {
+            Some(desc) => {
+                Device::new(desc.clone())
             }
             None => {
-                debug!("Model not supported");
-                anyhow::bail!(
-                    "Model {} with PIDs {:0>4x?} is not supported",
+                let pids_fmt = pid_list.iter()
+                    .map(|pid| format!("{:#06x}", pid))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                
+                Err(anyhow!(
+                    "Model {} with PIDs [{}] is not supported",
                     model_number_prefix,
-                    pid_list
-                )
+                    pids_fmt
+                ))
             }
         }
     }

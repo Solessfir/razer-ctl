@@ -1,24 +1,109 @@
 # Razer Blade Control Utlity
 
-The goal of this project is to build a crossplatform tool for controlling razer laptops bios settings without using synapse.
-One of the biggest benefits of using this tool over synapse is the ability to set your laptop bios to silent mode while on battery
-which for some inexplicable reason is not available in synapse. This improved my battery life on linux from 4ish hours to a consistent 7
-on a 2023 blade 14.
+The goal of this project is to build a cross-platform tool for controlling Razer laptops BIOS settings without using Synapse. One of the biggest benefits is the ability to set your laptop to silent mode while on battery, which significantly improves battery life.
+
+> **Note**: The `razer-tray` GUI application is currently not supported on Linux due to system tray library limitations.
 
 # Current Support
+- **2023 Blades** (14, 15, 16)
+- **2024 Blades** (14, 16, 18)
 
-- 2023 blades (14,15,16)
-- 2024 blades (14,16)
+<details>
+<summary>Blade 18 requires additional setup steps:</summary>
+
+#### Due to firmware changes in 2024 models, the Blade 18 requires these additional steps:
+
+### 1. Essential Kernel Parameters
+Add these parameters to your bootloader configuration:
+```bash
+acpi_enforce_resources=lax acpi_osi='!Windows 2022' acpi_backlight=vendor
+```
+
+- systemd-boot: Edit `/boot/loader/entries/linux-cachyos.conf`
+- GRUB: Edit `/etc/default/grub` then run `sudo update-grub`
+
+### systemd-boot full Example:
+```bash
+sudo nano /boot/loader/entries/linux-cachyos.conf
+
+title Linux Cachyos
+options root=UUID=a758-db363 rw rootflags=subvol=/@ zswap.enabled=0 nowatchdog splash acpi_enforce_resources=lax acpi_osi='!Windows 2022'
+linux /vmlinuz-linux-cachyos
+initrd /initramfs-linux-cachyos.img
+
+sudo mkinitcpio -P
+sudo bootctl update
+```
+
+### 2. udev Rules for Device Access
+```bash
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="1532", MODE="0666"' | sudo tee /etc/udev/rules.d/99-razer.rules
+sudo udevadm control --reload-rules
+```
+Or
+```bash
+sudo tee /etc/udev/rules.d/99-razer.rules <<EOF
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1532", MODE="0666"
+SUBSYSTEM=="platform", DRIVER=="ec_sys", MODE="0660", GROUP="users"
+EOF
+
+sudo usermod -aG users $USER
+sudo udevadm control --reload
+sudo udevadm trigger
+# Log out and back in
+```
+
+### 3. Permanent EC Access Service
+
+```bash
+sudo tee /etc/systemd/system/razerec.service >/dev/null <<END
+[Unit]
+Description=Razer EC Setup
+After=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c 'echo 1 > /sys/module/ec_sys/parameters/write_support'
+ExecStart=/usr/bin/bash -c 'chmod g+rw /sys/kernel/debug/ec/ec*/io'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+END
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now razerec.service
+```
+
+### 4. Verefication
+```bash
+# Check EC write support
+cat /sys/module/ec_sys/parameters/write_support  # Should be 1
+
+# Test hardware access
+razer-cli auto info
+```
+
+### Troubleshooting
+- ACPI errors in dmesg: Verify kernel parameters
+- Permission denied: Recheck udev rules and group membership
+- No hardware effect: Test EC write manually:
+```bash
+echo -ne '\x03' | sudo dd of=/sys/kernel/debug/ec/ec0/io bs=1 seek=110 conv=notrunc
+```
+</details>
 
 # Current Features
-
-Performance modes (including overclock)
-Lid logo modes (if available): off, static, breathing
-Keyboard brightness
+- Performance modes (including overclock)
+- Fan control (RPM setting in manual mode)
+- Lid logo modes (off, static, breathing)
+- Keyboard brightness control
+- Battery health optimizer
+- Lighting always-on control
 
 ## Usage
 
-```sh
+```bash
 Usage: razer-cli <COMMAND>
 
 Commands:
@@ -30,6 +115,20 @@ Commands:
 Options:
   -h, --help     Print help
   -V, --version  Print version
+
+
+# Detect and control automatically
+razer-cli auto perf mode balanced
+razer-cli auto fan manual
+razer-cli auto fan rpm 4000
+
+razer-cli auto fan auto
+
+# Manual device selection
+razer-cli manual -p 0x02B8 info
+
+# List supported devices
+razer-cli enumerate
 ```
 
 ## Reverse Engineering

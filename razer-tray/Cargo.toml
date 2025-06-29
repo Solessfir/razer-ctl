@@ -4,7 +4,7 @@ version = "0.6.0"
 edition = "2021"
 
 authors = ["Tarek Dakhran <>"]
-homepage = "https://github.com/tdakhran/razer-ctl"
+homepage = "https://github.com/solessfir/razer-ctl"
 description = "A tray icon for controlling Razer Blade"
 
 [dependencies]

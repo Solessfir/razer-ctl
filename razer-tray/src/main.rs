@@ -633,21 +633,19 @@ fn main() -> Result<()> {
     log::info!("{0} starting {1} {0}", "==".repeat(20), PKG_NAME);
 
     let device = match device::Device::detect() {
-        Ok(d) => {
-            log::info!(
-                "detected device: {} (0x{:04X})",
-                d.info().name,
-                d.info().pid
-            );
-            d
-        }
+        Ok(d) => d,
         Err(e) => {
-            log::error!("{:?}", e);
+            log::error!("Device detection failed: {}", e);
             native_dialog::MessageDialog::new()
                 .set_type(native_dialog::MessageType::Error)
-                .set_text(format!("{:?}", e).as_str())
-                .show_alert()?;
-            return Err(e);
+                .set_title("Razer Control Error")
+                .set_text(&format!(
+                    "Could not detect compatible Razer device.\n\nError: {}\n\nPlease ensure:\n1. Device is connected\n2. Kernel modules are loaded\n3. udev rules are configured",
+                    e
+                ))
+                .show_alert()
+                .expect("Failed to show error dialog");
+            std::process::exit(1);
         }
     };
 

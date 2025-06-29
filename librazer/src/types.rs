@@ -142,7 +142,8 @@ impl TryFrom<u8> for BatteryCare {
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x50 => Ok(BatteryCare::Disable),
-            0xd0 => Ok(BatteryCare::Enable),
+            0xD0 => Ok(BatteryCare::Enable),
+            0xB2 => Ok(BatteryCare::Enable),
             _ => bail!("Failed to convert {} to BatteryCare", value),
         }
     }
