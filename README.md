@@ -13,6 +13,13 @@ The goal of this project is to build a cross-platform tool for controlling Razer
 
 #### Due to firmware changes in 2024 models, the Blade 18 requires these additional steps:
 
+### 0. Run install script
+```
+chmod +x blade18_install.sh
+./blade18_install.sh
+sudo reboot
+```
+
 ### 1. Essential Kernel Parameters
 Add these parameters to your bootloader configuration:
 ```bash
