@@ -35,6 +35,19 @@ pub const SUPPORTED: &[Descriptor] = &[
             "perf",
         ],
     },
+    Descriptor {
+        model_number_prefix: "RZ09-05092EK4",
+        name: "Razer Blade 18 (2024)",
+        pid: 0x02B8,
+        features: &[
+            "battery-care",
+            "fan",
+            "kbd-backlight",
+            "lid-logo",
+            "lights-always-on",
+            "perf",
+        ],
+    },
 ];
 
 const _VALIDATE_FEATURES: () = {
