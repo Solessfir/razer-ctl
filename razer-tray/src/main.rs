@@ -33,6 +33,7 @@ enum FanSpeed {
 enum PerfMode {
     Silent,
     Balanced(FanSpeed),
+    Turbo(FanSpeed),
     Custom(CpuBoost, GpuBoost, MaxFanSpeedMode),
 }
 
@@ -60,6 +61,13 @@ impl DeviceState {
             (librazer::types::PerfMode::Balanced, librazer::types::FanMode::Manual) => {
                 let fan_speed = command::get_fan_rpm(device, librazer::types::FanZone::Zone1)?;
                 PerfMode::Balanced(FanSpeed::Manual(fan_speed))
+            }
+            (librazer::types::PerfMode::Turbo, librazer::types::FanMode::Auto) => {
+                PerfMode::Turbo(FanSpeed::Auto)
+            }
+            (librazer::types::PerfMode::Turbo, librazer::types::FanMode::Manual) => {
+                let fan_speed = command::get_fan_rpm(device, librazer::types::FanZone::Zone1)?;
+                PerfMode::Turbo(FanSpeed::Manual(fan_speed))
             }
             (librazer::types::PerfMode::Custom, _) => {
                 let cpu_boost = command::get_cpu_boost(device)?;
@@ -92,6 +100,14 @@ impl DeviceState {
             }
             PerfMode::Balanced(FanSpeed::Manual(rpm)) => {
                 command::set_perf_mode(device, librazer::types::PerfMode::Balanced)?;
+                command::set_fan_mode(device, librazer::types::FanMode::Manual)?;
+                command::set_fan_rpm(device, rpm)
+            }
+            PerfMode::Turbo(FanSpeed::Auto) => {
+                command::set_perf_mode(device, librazer::types::PerfMode::Turbo)
+            }
+            PerfMode::Turbo(FanSpeed::Manual(rpm)) => {
+                command::set_perf_mode(device, librazer::types::PerfMode::Turbo)?;
                 command::set_fan_mode(device, librazer::types::FanMode::Manual)?;
                 command::set_fan_rpm(device, rpm)
             }
@@ -254,6 +270,50 @@ impl ProgramState {
             "Balanced",
             true,
             &fan_speeds
+                .iter()
+                .map(|i| i as &dyn IsMenuItem)
+                .collect::<Vec<_>>(),
+        )?)?;
+
+        // turbo
+        let turbo_fan_speeds: Vec<CheckMenuItem> = [CheckMenuItem::with_id(
+            "turbo_fan_speed:auto",
+            "Fan: Auto",
+            dstate.perf_mode != PerfMode::Turbo(FanSpeed::Auto),
+            dstate.perf_mode == PerfMode::Turbo(FanSpeed::Auto),
+            None,
+        )]
+        .into_iter()
+        .chain((2000..=5000).step_by(500).map(|rpm| {
+            let event_id = format!("turbo_fan_speed:{}", rpm);
+            event_handlers.insert(
+                event_id.clone(),
+                DeviceState {
+                    perf_mode: PerfMode::Turbo(FanSpeed::Manual(rpm)),
+                    ..*dstate
+                },
+            );
+            CheckMenuItem::with_id(
+                event_id,
+                format!("Fan: {} RPM", rpm),
+                dstate.perf_mode != PerfMode::Turbo(FanSpeed::Manual(rpm)),
+                dstate.perf_mode == PerfMode::Turbo(FanSpeed::Manual(rpm)),
+                None,
+            )
+        }))
+        .collect();
+        event_handlers.insert(
+            "turbo_fan_speed:auto".to_string(),
+            DeviceState {
+                perf_mode: PerfMode::Turbo(FanSpeed::Auto),
+                ..*dstate
+            },
+        );
+
+        perf_modes.append(&Submenu::with_items(
+            "Turbo",
+            true,
+            &turbo_fan_speeds
                 .iter()
                 .map(|i| i as &dyn IsMenuItem)
                 .collect::<Vec<_>>(),
@@ -468,6 +528,9 @@ impl ProgramState {
             perf_mode: match self.device_state.perf_mode {
                 PerfMode::Silent => PerfMode::Balanced(FanSpeed::Auto),
                 PerfMode::Balanced(..) => {
+                    PerfMode::Turbo(FanSpeed::Auto)
+                }
+                PerfMode::Turbo(..) => {
                     PerfMode::Custom(CpuBoost::Boost, GpuBoost::High, MaxFanSpeedMode::Disable)
                 }
                 PerfMode::Custom(..) => PerfMode::Silent,
@@ -488,6 +551,12 @@ impl ProgramState {
             }
             PerfMode::Balanced(FanSpeed::Manual(rpm)) => {
                 writeln!(&mut info, "Balanced {}", rpm)?;
+            }
+            PerfMode::Turbo(FanSpeed::Auto) => {
+                writeln!(&mut info, "Turbo (Auto)")?;
+            }
+            PerfMode::Turbo(FanSpeed::Manual(rpm)) => {
+                writeln!(&mut info, "Turbo {}", rpm)?;
             }
             PerfMode::Custom(cpu_boost, gpu_boost, max_fan_speed) => {
                 writeln!(&mut info, "Custom",)?;
@@ -532,6 +601,8 @@ impl ProgramState {
         let image = match self.device_state.perf_mode {
             PerfMode::Silent => image::load_from_memory(razer_yellow),
             PerfMode::Balanced(_) => image::load_from_memory(razer_green),
+            // TODO: Add new Turbo icon
+            PerfMode::Turbo(_) => image::load_from_memory(razer_red),
             PerfMode::Custom(_, _, _) => image::load_from_memory(razer_red),
         };
 
