@@ -20,6 +20,9 @@ trait Cli: feature::Feature {
     fn handle(&self, _device: &device::Device, _matches: &clap::ArgMatches) -> Result<()> {
         Ok(())
     }
+    fn notify(&self, message: &str) {
+        info!("{}", message);
+    }
 }
 
 macro_rules! impl_unary_cmd_cli {
@@ -58,7 +61,13 @@ macro_rules! impl_unary_cli {
                 match matches.subcommand() {
                     Some((ident, matches)) if ident == self.name() => {
                         let arg = matches.get_one::<$arg_type>("ARG").unwrap();
-                        $setter(device, *arg)
+                        $setter(device, *arg)?;
+                        self.notify(&format!(
+                            "{} set to {:?}",
+                            self.name().replace('-', " "),
+                            arg
+                        ));
+                        Ok(())
                     }
                     Some(("info", _)) => {
                         info!("{}: {:?}", self.name(), $getter(device)?);
@@ -109,6 +118,7 @@ impl Cli for CustomCommand {
                 let cmd = *matches.get_one::<u16>("COMMAND").unwrap();
                 let args: Vec<u8> = matches.get_many::<u8>("ARGS").unwrap().copied().collect();
                 debug!("Running custom command: {:x?} {:?}", cmd, args);
+                self.notify("Custom command executed successfully");
                 command::custom_command(device, cmd, &args)
             }
             _ => Ok(()),
@@ -132,14 +142,21 @@ impl Cli for feature::Fan {
     fn handle(&self, device: &device::Device, matches: &clap::ArgMatches) -> Result<()> {
         match matches.subcommand() {
             Some((ident, matches)) if ident == self.name() => {
-                impl_unary_handle_cli! {<u16>(matches, device, "rpm", "RPM", command::set_fan_rpm)}
-                impl_unary_handle_cli! {<MaxFanSpeedMode>(matches, device, "max", "MAX", command::set_max_fan_speed_mode)}
-
-                match matches.subcommand() {
-                    Some(("auto", _)) => command::set_fan_mode(device, FanMode::Auto),
-                    Some(("manual", _)) => command::set_fan_mode(device, FanMode::Manual),
-                    _ => Ok(()),
+                if let Some(_) = matches.subcommand_matches("auto") {
+                    command::set_fan_mode(device, FanMode::Auto)?;
+                    self.notify("Fan mode set to Auto");
                 }
+                if let Some(_) = matches.subcommand_matches("manual") {
+                    command::set_fan_mode(device, FanMode::Manual)?;
+                    self.notify("Fan mode set to Manual");
+                }
+                if let Some(rpm_matches) = matches.subcommand_matches("rpm") {
+                    let rpm = *rpm_matches.get_one::<u16>("RPM").unwrap();
+                    command::set_fan_rpm(device, rpm)?;
+                    self.notify(&format!("Fan RPM set to {}", rpm));
+                }
+                impl_unary_handle_cli! {<MaxFanSpeedMode>(matches, device, "max", "MAX", command::set_max_fan_speed_mode)}
+                Ok(())
             }
             Some(("info", _)) => {
                 match command::get_perf_mode(device) {
@@ -175,7 +192,15 @@ impl Cli for feature::Perf {
     fn handle(&self, device: &device::Device, matches: &clap::ArgMatches) -> Result<()> {
         match matches.subcommand() {
             Some((ident, matches)) if ident == self.name() => {
-                impl_unary_handle_cli! {<PerfMode>(matches, device, "mode", "MODE", command::set_perf_mode)}
+                if let Some(mode_matches) = matches.subcommand_matches("mode") {
+                    let old_mode = command::get_perf_mode(device)?.0;
+                    let new_mode = *mode_matches.get_one::<PerfMode>("MODE").unwrap();
+                    command::set_perf_mode(device, new_mode)?;
+                    self.notify(&format!(
+                        "Performance mode changed from {:?} to {:?}",
+                        old_mode, new_mode
+                    ));
+                }
                 impl_unary_handle_cli! {<CpuBoost>(matches, device, "cpu", "CPU", command::set_cpu_boost)}
                 impl_unary_handle_cli! {<GpuBoost>(matches, device, "gpu", "GPU", command::set_gpu_boost)}
                 Ok(())
