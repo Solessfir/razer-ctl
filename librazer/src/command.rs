@@ -21,7 +21,7 @@ fn _set_perf_mode(device: &Device, perf_mode: PerfMode, fan_mode: FanMode) -> Re
     [1, 2].into_iter().try_for_each(|zone| {
         _send_command(
             device,
-            0x0d02,
+            0x0d02, // HID command 0x0d02 controls performance modes
             &[0x01, zone, perf_mode as u8, fan_mode as u8],
         )
         .map(|_| ())
